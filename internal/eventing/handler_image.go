@@ -4,59 +4,40 @@ import (
 	"context"
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/weeb-vip/thetvdb-enrichment/config"
+	"github.com/weeb-vip/thetvdb-enrichment/internal/db"
+	anime "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime_episode"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/logger"
-	"github.com/weeb-vip/thetvdb-enrichment/internal/services/processor"
+	"github.com/weeb-vip/thetvdb-enrichment/internal/services/consumer"
+	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_api"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_processor"
-	"go.uber.org/zap"
-	"time"
+	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_service"
+	"net/http"
 )
 
-func EventingImage() error {
+func Eventing() error {
 	cfg := config.LoadConfigOrPanic()
 	ctx := context.Background()
 	log := logger.Get()
 	ctx = logger.WithCtx(ctx, log)
 
-	imageProcessor := thetvdb_processor.NewTheTVDBProcessor()
+	httpClient := &http.Client{}
+	thetvdbAPI := thetvdb_api.NewTheTVDBApi(cfg.TheTVDBConfig, httpClient)
 
-	messageProcessor := processor.NewProcessor[thetvdb_processor.Payload]()
+	thetvdbService := thetvdb_service.NewTheTVDBService(thetvdbAPI)
+	database := db.NewDB(cfg.DBConfig)
+	episodeRepo := anime.NewAnimeEpisodeRepository(database)
+	processor := thetvdb_processor.NewTheTVDBProcessor(thetvdbService, episodeRepo)
 
-	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL: cfg.PulsarConfig.URL,
+	animeConsumer := consumer.NewConsumer[thetvdb_processor.Payload](ctx, cfg.PulsarConfig)
+
+	log.Info("Starting anime eventing")
+	err := animeConsumer.Receive(ctx, func(ctx context.Context, msg pulsar.Message) error {
+		return animeConsumer.Process(ctx, string(msg.Payload()), processor.Process)
 	})
-
 	if err != nil {
-		log.Fatal("Error creating pulsar client: ", zap.String("error", err.Error()))
+		log.Error(fmt.Sprintf("Error receiving message: %v", err))
 		return err
 	}
 
-	defer client.Close()
-
-	consumer, err := client.Subscribe(pulsar.ConsumerOptions{
-		Topic:            cfg.PulsarConfig.Topic,
-		SubscriptionName: cfg.PulsarConfig.SubscribtionName,
-		Type:             pulsar.Shared,
-	})
-
-	defer consumer.Close()
-
-	// create channel to receive messages
-
-	for {
-		msg, err := consumer.Receive(ctx)
-		if err != nil {
-			log.Fatal("Error receiving message: ", zap.String("error", err.Error()))
-		}
-
-		log.Info("Received message", zap.String("msgId", msg.ID().String()))
-
-		err = messageProcessor.Process(ctx, string(msg.Payload()), imageProcessor.Process)
-		if err != nil {
-			log.Warn("error processing message: ", zap.String("error", err.Error()))
-			continue
-		}
-		consumer.Ack(msg)
-		time.Sleep(50 * time.Millisecond)
-	}
-	return nil
+	return err
 }
