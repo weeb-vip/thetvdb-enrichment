@@ -3,8 +3,8 @@ package consumer
 import (
 	"context"
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/weeb-vip/anime-sync/config"
-	"github.com/weeb-vip/anime-sync/internal/logger"
+	"github.com/weeb-vip/thetvdb-enrichment/config"
+	"github.com/weeb-vip/thetvdb-enrichment/internal/logger"
 	"go.uber.org/zap"
 	"time"
 )

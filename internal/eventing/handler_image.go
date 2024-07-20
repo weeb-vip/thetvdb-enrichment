@@ -2,12 +2,14 @@ package eventing
 
 import (
 	"context"
+	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/weeb-vip/thetvdb-enrichment/config"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/db"
 	anime "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime_episode"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/logger"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/consumer"
+	"github.com/weeb-vip/thetvdb-enrichment/internal/services/processor"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_api"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_processor"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_service"
@@ -26,13 +28,14 @@ func Eventing() error {
 	thetvdbService := thetvdb_service.NewTheTVDBService(thetvdbAPI)
 	database := db.NewDB(cfg.DBConfig)
 	episodeRepo := anime.NewAnimeEpisodeRepository(database)
-	processor := thetvdb_processor.NewTheTVDBProcessor(thetvdbService, episodeRepo)
+	tvdbProcessor := thetvdb_processor.NewTheTVDBProcessor(thetvdbService, episodeRepo)
+	messageProcessor := processor.NewProcessor[thetvdb_processor.Payload]()
 
 	animeConsumer := consumer.NewConsumer[thetvdb_processor.Payload](ctx, cfg.PulsarConfig)
 
 	log.Info("Starting anime eventing")
 	err := animeConsumer.Receive(ctx, func(ctx context.Context, msg pulsar.Message) error {
-		return animeConsumer.Process(ctx, string(msg.Payload()), processor.Process)
+		return messageProcessor.Process(ctx, string(msg.Payload()), tvdbProcessor.Process)
 	})
 	if err != nil {
 		log.Error(fmt.Sprintf("Error receiving message: %v", err))
