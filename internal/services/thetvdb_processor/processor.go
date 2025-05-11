@@ -60,15 +60,15 @@ func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data Payload) error 
 				titleJP = episode.Translations["jpn"].Name
 			}
 
-			var episodeAired *string
+			var episodeAired *time.Time
 
 			if episode.Aired != nil {
 				aired, err := time.Parse("2006-01-02", *episode.Aired)
 				if err != nil {
 					return err
 				}
-				episodeAiredFormatted := aired.Format("2006-01-02 15:04:05")
-				episodeAired = &episodeAiredFormatted
+
+				episodeAired = &aired
 			}
 
 			var Synopsis *string
