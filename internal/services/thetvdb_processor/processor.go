@@ -37,6 +37,13 @@ func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data Payload) error 
 		return err
 	}
 
+	// clear out episodes
+	err = p.episodeRepo.DeleteByAnimeID(ctx, data.Data.AnimeID)
+	if err != nil {
+		log.Error("Failed to delete episodes", zap.Error(err))
+		return err
+	}
+
 	if animeWithEpisodes != nil {
 		log.Info("Episodes found", zap.Int("count", len(*animeWithEpisodes)))
 
@@ -86,7 +93,7 @@ func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data Payload) error 
 				Aired:    episodeAired,
 				Synopsis: Synopsis,
 			}
-			err := p.episodeRepo.Upsert(episodeRecord)
+			err := p.episodeRepo.Upsert(ctx, episodeRecord)
 			if err != nil {
 				return err
 			}

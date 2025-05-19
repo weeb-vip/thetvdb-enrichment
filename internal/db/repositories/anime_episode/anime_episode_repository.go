@@ -1,6 +1,7 @@
 package anime
 
 import (
+	"context"
 	"github.com/google/uuid"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/db"
 	"time"
@@ -9,8 +10,9 @@ import (
 type RECORD_TYPE string
 
 type AnimeEpisodeRepositoryImpl interface {
-	Upsert(anime *AnimeEpisode) error
-	Delete(anime *AnimeEpisode) error
+	Upsert(ctx context.Context, anime *AnimeEpisode) error
+	Delete(ctx context.Context, anime *AnimeEpisode) error
+	DeleteByAnimeID(ctx context.Context, animeID string) error
 }
 
 type AnimeEpisodeRepository struct {
@@ -21,7 +23,7 @@ func NewAnimeEpisodeRepository(db *db.DB) AnimeEpisodeRepositoryImpl {
 	return &AnimeEpisodeRepository{db: db}
 }
 
-func (a *AnimeEpisodeRepository) Upsert(episode *AnimeEpisode) error {
+func (a *AnimeEpisodeRepository) Upsert(ctx context.Context, episode *AnimeEpisode) error {
 	// find episode by anime_id and episode_number
 	var existing AnimeEpisode
 	err := a.db.DB.Where("anime_id = ? AND episode = ?", episode.AnimeID, episode.Episode).First(&existing).Error
@@ -46,8 +48,16 @@ func (a *AnimeEpisodeRepository) Upsert(episode *AnimeEpisode) error {
 	return nil
 }
 
-func (a *AnimeEpisodeRepository) Delete(episode *AnimeEpisode) error {
+func (a *AnimeEpisodeRepository) Delete(ctx context.Context, episode *AnimeEpisode) error {
 	err := a.db.DB.Delete(episode).Error
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *AnimeEpisodeRepository) DeleteByAnimeID(ctx context.Context, animeID string) error {
+	err := a.db.DB.Where("anime_id = ?", animeID).Delete(&AnimeEpisode{}).Error
 	if err != nil {
 		return err
 	}
