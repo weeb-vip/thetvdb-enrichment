@@ -98,6 +98,17 @@ func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data Payload) error 
 				return err
 			}
 		}
+		// fix absolute number if start at 2
+		if len(*animeWithEpisodes) > 0 {
+			firstEpisode := (*animeWithEpisodes)[0]
+			if firstEpisode.AbsoluteNumber != nil && *firstEpisode.AbsoluteNumber == 1 {
+				for _, episode := range *animeWithEpisodes {
+					if episode.AbsoluteNumber != nil {
+						*episode.AbsoluteNumber = *episode.AbsoluteNumber - 1
+					}
+				}
+			}
+		}
 
 	}
 
