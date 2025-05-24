@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/weeb-vip/thetvdb-enrichment/config"
 	db2 "github.com/weeb-vip/thetvdb-enrichment/internal/db"
+	anime2 "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime"
 	anime "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime_episode"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_api"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_processor"
@@ -35,7 +36,8 @@ func TestNewTheTVDBProcessor(t *testing.T) {
 		thetvdbService := thetvdb_service.NewTheTVDBService(thetvdbAPI)
 		db := db2.NewDB(dbConfig)
 		episodeRepo := anime.NewAnimeEpisodeRepository(db)
-		processor := thetvdb_processor.NewTheTVDBProcessor(thetvdbService, episodeRepo)
+		animeRepo := anime2.NewAnimeRepository(db)
+		processor := thetvdb_processor.NewTheTVDBProcessor(thetvdbService, animeRepo, episodeRepo)
 		if processor == nil {
 			t.Errorf("Expected processor to be not nil")
 		}

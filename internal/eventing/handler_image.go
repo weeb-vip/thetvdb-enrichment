@@ -6,6 +6,7 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/weeb-vip/thetvdb-enrichment/config"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/db"
+	anime2 "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime"
 	anime "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime_episode"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/logger"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/consumer"
@@ -28,7 +29,8 @@ func Eventing() error {
 	thetvdbService := thetvdb_service.NewTheTVDBService(thetvdbAPI)
 	database := db.NewDB(cfg.DBConfig)
 	episodeRepo := anime.NewAnimeEpisodeRepository(database)
-	tvdbProcessor := thetvdb_processor.NewTheTVDBProcessor(thetvdbService, episodeRepo)
+	animeRepo := anime2.NewAnimeRepository(database)
+	tvdbProcessor := thetvdb_processor.NewTheTVDBProcessor(thetvdbService, animeRepo, episodeRepo)
 	messageProcessor := processor.NewProcessor[thetvdb_processor.Payload]()
 
 	animeConsumer := consumer.NewConsumer[thetvdb_processor.Payload](ctx, cfg.PulsarConfig)

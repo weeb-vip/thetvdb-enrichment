@@ -1,6 +1,7 @@
 package thetvdb_processor
 
 import (
+	anime2 "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime"
 	anime "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime_episode"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/logger"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_service"
@@ -16,11 +17,13 @@ type TheTVDBProcessor interface {
 type TheTVDBProcessorImpl struct {
 	theTVDBService thetvdb_service.TheTVDBService
 	episodeRepo    anime.AnimeEpisodeRepositoryImpl
+	animeRepo      anime2.AnimeRepositoryImpl
 }
 
-func NewTheTVDBProcessor(theTVDBService thetvdb_service.TheTVDBService, episodeRepo anime.AnimeEpisodeRepositoryImpl) TheTVDBProcessor {
+func NewTheTVDBProcessor(theTVDBService thetvdb_service.TheTVDBService, animeRepo anime2.AnimeRepositoryImpl, episodeRepo anime.AnimeEpisodeRepositoryImpl) TheTVDBProcessor {
 	return &TheTVDBProcessorImpl{
 		theTVDBService: theTVDBService,
+		animeRepo:      animeRepo,
 		episodeRepo:    episodeRepo,
 	}
 }
@@ -28,7 +31,22 @@ func NewTheTVDBProcessor(theTVDBService thetvdb_service.TheTVDBService, episodeR
 func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data Payload) error {
 	log := logger.FromCtx(ctx)
 
-	log.Info("Processing record", zap.String("id", data.Data.AnimeID), zap.String("thetvdb_link_id", data.Data.TheTVDBLinkID), zap.Int("season", data.Data.Season))
+	animeName := "unknown"
+
+	animeData, err := p.animeRepo.FindById(data.Data.AnimeID)
+	if err != nil {
+		return err
+	}
+	if animeData != nil {
+		if animeData.TitleEn != nil {
+			animeName = *animeData.TitleEn
+		}
+		if animeData.TitleJp != nil {
+			animeName = *animeData.TitleJp
+		}
+	}
+
+	log.Info("Processing record", zap.String("id", data.Data.AnimeID), zap.String("animeName", animeName), zap.String("thetvdb_link_id", data.Data.TheTVDBLinkID), zap.Int("season", data.Data.Season))
 
 	season := data.Data.Season
 
