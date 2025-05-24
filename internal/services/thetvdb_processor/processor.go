@@ -84,7 +84,7 @@ func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data Payload) error 
 			} else {
 				Synopsis = episode.Translations["jpn"].Overview
 			}
-			episodeNumber := *episode.AbsoluteNumber + 1
+			episodeNumber := *episode.Number
 			episodeRecord := &anime.AnimeEpisode{
 				AnimeID:  &data.Data.AnimeID,
 				Episode:  &episodeNumber,
@@ -96,17 +96,6 @@ func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data Payload) error 
 			err := p.episodeRepo.Upsert(ctx, episodeRecord)
 			if err != nil {
 				return err
-			}
-		}
-		// fix absolute number if start at 2
-		if len(*animeWithEpisodes) > 0 {
-			firstEpisode := (*animeWithEpisodes)[0]
-			if firstEpisode.AbsoluteNumber != nil && *firstEpisode.AbsoluteNumber == 1 {
-				for _, episode := range *animeWithEpisodes {
-					if episode.AbsoluteNumber != nil {
-						*episode.AbsoluteNumber = *episode.AbsoluteNumber - 1
-					}
-				}
 			}
 		}
 
