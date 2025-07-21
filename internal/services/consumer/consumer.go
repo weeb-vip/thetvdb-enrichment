@@ -66,6 +66,7 @@ func (c *ConsumerImpl[T]) Receive(ctx context.Context, process func(ctx context.
 		err = process(ctx, msg)
 		if err != nil {
 			log.Warn("error processing message: ", zap.String("error", err.Error()))
+			consumer.Ack(msg)
 			continue
 		}
 		consumer.Ack(msg)
