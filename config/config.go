@@ -9,6 +9,7 @@ type Config struct {
 	DBConfig      DBConfig
 	PulsarConfig  PulsarConfig
 	TheTVDBConfig TheTVDBConfig `env:"THETVDB"`
+	KafkaConfig   KafkaConfig
 }
 
 type AppConfig struct {
@@ -30,6 +31,14 @@ type PulsarConfig struct {
 	URL              string `default:"pulsar://localhost:6650" env:"PULSARURL"`
 	Topic            string `default:"public/default/myanimelist.public.anime" env:"PULSARTOPIC"`
 	SubscribtionName string `default:"my-sub" env:"PULSARSUBSCRIPTIONNAME"`
+}
+
+type KafkaConfig struct {
+	ConsumerGroupName string `default:"image-sync-group" env:"KAFKA_CONSUMER_GROUP_NAME"`
+	BootstrapServers  string `default:"localhost:9092" env:"KAFKA_BOOTSTRAP_SERVERS"`
+	Offset            string `default:"earliest" env:"KAFKA_OFFSET"`
+	Topic             string `default:"anime-db.public.anime" env:"KAFKA_TOPIC"`
+	ProducerTopic     string `default:"image-sync" env:"KAFKA_PRODUCER_TOPIC"`
 }
 
 type TheTVDBConfig struct {
