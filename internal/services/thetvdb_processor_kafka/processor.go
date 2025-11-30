@@ -103,7 +103,7 @@ func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data event.Event[*ka
 			var Synopsis *string
 			if episode.Translations["eng"] != nil {
 				Synopsis = episode.Translations["eng"].Overview
-			} else {
+			} else if episode.Translations["jpn"] != nil {
 				Synopsis = episode.Translations["jpn"].Overview
 			}
 			episodeNumber := *episode.Number
