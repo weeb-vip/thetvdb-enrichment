@@ -193,3 +193,15 @@ type Response[T any] struct {
 type LoginResponse struct {
 	Token *string `json:"token"`
 }
+
+type Artwork struct {
+	ID    *int64  `json:"id,omitempty"`
+	Image *string `json:"image,omitempty"`
+	Type  *int    `json:"type,omitempty"`
+	Score *int64  `json:"score,omitempty"`
+}
+
+type SeriesExtendedRecord struct {
+	Image    *string   `json:"image,omitempty"`
+	Artworks []Artwork `json:"artworks,omitempty"`
+}

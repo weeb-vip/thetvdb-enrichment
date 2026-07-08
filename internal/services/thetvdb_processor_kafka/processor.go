@@ -1,6 +1,8 @@
 package thetvdb_processor_kafka
 
 import (
+	"encoding/json"
+
 	"github.com/ThatCatDev/ep/v2/event"
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	anime2 "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime"
@@ -20,14 +22,50 @@ type TheTVDBProcessorImpl struct {
 	theTVDBService thetvdb_service.TheTVDBService
 	episodeRepo    anime.AnimeEpisodeRepositoryImpl
 	animeRepo      anime2.AnimeRepositoryImpl
+	Producer       func(ctx context.Context, message *kafka.Message) error
 }
 
-func NewTheTVDBProcessor(theTVDBService thetvdb_service.TheTVDBService, animeRepo anime2.AnimeRepositoryImpl, episodeRepo anime.AnimeEpisodeRepositoryImpl) TheTVDBProcessor {
+func NewTheTVDBProcessor(theTVDBService thetvdb_service.TheTVDBService, animeRepo anime2.AnimeRepositoryImpl, episodeRepo anime.AnimeEpisodeRepositoryImpl, producer func(ctx context.Context, message *kafka.Message) error) TheTVDBProcessor {
 	return &TheTVDBProcessorImpl{
 		theTVDBService: theTVDBService,
 		animeRepo:      animeRepo,
 		episodeRepo:    episodeRepo,
+		Producer:       producer,
 	}
+}
+
+// publishBanner sends the series background artwork to the image-sync
+// topic keyed by anime id; failures are logged but never fail the
+// message, banners are best-effort
+func (p *TheTVDBProcessorImpl) publishBanner(ctx context.Context, animeID string, seriesID string) {
+	log := logger.FromCtx(ctx)
+
+	if p.Producer == nil {
+		return
+	}
+	bannerURL, err := p.theTVDBService.GetSeriesBannerURL(ctx, seriesID)
+	if err != nil {
+		log.Warn("Failed to fetch banner artwork", zap.String("thetvdb_link_id", seriesID), zap.Error(err))
+		return
+	}
+	if bannerURL == "" {
+		return
+	}
+
+	payloadBytes, err := json.Marshal(ImagePayload{Data: ImageSchema{
+		Name: animeID,
+		URL:  bannerURL,
+		Type: "Banner",
+	}})
+	if err != nil {
+		log.Warn("Failed to marshal banner payload", zap.Error(err))
+		return
+	}
+	if err := p.Producer(ctx, &kafka.Message{Value: payloadBytes}); err != nil {
+		log.Warn("Failed to publish banner", zap.String("anime_id", animeID), zap.Error(err))
+		return
+	}
+	log.Info("Published banner", zap.String("anime_id", animeID), zap.String("url", bannerURL))
 }
 
 func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data event.Event[*kafka.Message, Payload]) (event.Event[*kafka.Message, Payload], error) {
@@ -113,6 +151,8 @@ func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data event.Event[*ka
 		}
 
 	}
+
+	p.publishBanner(ctx, payload.Data.AnimeID, payload.Data.TheTVDBLinkID)
 
 	//if payload.Before != nil && payload.After == nil {
 	//	// new record
