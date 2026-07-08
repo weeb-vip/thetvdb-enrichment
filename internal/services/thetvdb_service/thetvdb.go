@@ -18,7 +18,14 @@ type AnimeWithEpisodes struct {
 
 type TheTVDBService interface {
 	FindAnime(ctx context.Context, title string, year string) (*AnimeWithEpisodes, error)
-	GetEpisodesBySeriesID(ctx context.Context, seriesID string) (*[]AnimeEpisodeWithTranslation, error)
+	GetEpisodesBySeriesID(ctx context.Context, seriesID string, season *int) (*[]AnimeEpisodeWithTranslation, error)
+}
+
+// translation fetches cost one API call per episode per language, so only
+// fetch the languages the processors consume
+var wantedTranslations = map[string]bool{
+	"eng": true,
+	"jpn": true,
 }
 
 type TheTVDBServiceImpl struct {
@@ -43,7 +50,7 @@ func (s *TheTVDBServiceImpl) FindAnime(ctx context.Context, title string, year s
 		}
 	}
 	if animeResult != nil {
-		animeEpisodes, err := s.getAnimeEpisodes(ctx, *animeResult.TVDBID)
+		animeEpisodes, err := s.getAnimeEpisodes(ctx, *animeResult.TVDBID, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -57,7 +64,7 @@ func (s *TheTVDBServiceImpl) FindAnime(ctx context.Context, title string, year s
 	return nil, nil
 }
 
-func (s *TheTVDBServiceImpl) getAnimeEpisodes(ctx context.Context, seriesID string) (*[]AnimeEpisodeWithTranslation, error) {
+func (s *TheTVDBServiceImpl) getAnimeEpisodes(ctx context.Context, seriesID string, season *int) (*[]AnimeEpisodeWithTranslation, error) {
 	episodes, err := s.api.GetEpisodesBySeriesID(ctx, seriesID)
 	if err != nil {
 		return nil, err
@@ -65,10 +72,16 @@ func (s *TheTVDBServiceImpl) getAnimeEpisodes(ctx context.Context, seriesID stri
 
 	var episodesWithTranslations []AnimeEpisodeWithTranslation
 	for _, episode := range episodes.Episodes {
+		if season != nil && episode.SeasonNumber != nil && *episode.SeasonNumber != *season {
+			continue
+		}
 		translations := make(map[string]*thetvdb_api.Translation)
 
 		episodeID := strconv.FormatInt(*episode.ID, 10)
 		for _, translation := range episode.NameTranslations {
+			if !wantedTranslations[translation] {
+				continue
+			}
 			translationRes, err := s.getEpisodeTranslation(ctx, episodeID, translation)
 			if err != nil {
 				return nil, err
@@ -94,6 +107,6 @@ func (s *TheTVDBServiceImpl) getEpisodeTranslation(ctx context.Context, episodeI
 	return translation, nil
 }
 
-func (s *TheTVDBServiceImpl) GetEpisodesBySeriesID(ctx context.Context, seriesID string) (*[]AnimeEpisodeWithTranslation, error) {
-	return s.getAnimeEpisodes(ctx, seriesID)
+func (s *TheTVDBServiceImpl) GetEpisodesBySeriesID(ctx context.Context, seriesID string, season *int) (*[]AnimeEpisodeWithTranslation, error) {
+	return s.getAnimeEpisodes(ctx, seriesID, season)
 }

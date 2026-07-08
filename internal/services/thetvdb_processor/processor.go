@@ -50,7 +50,7 @@ func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data Payload) error 
 
 	season := data.Data.Season
 
-	animeWithEpisodes, err := p.theTVDBService.GetEpisodesBySeriesID(ctx, data.Data.TheTVDBLinkID)
+	animeWithEpisodes, err := p.theTVDBService.GetEpisodesBySeriesID(ctx, data.Data.TheTVDBLinkID, &season)
 	if err != nil {
 		return err
 	}
@@ -67,15 +67,6 @@ func (p *TheTVDBProcessorImpl) Process(ctx context.Context, data Payload) error 
 
 		// update record
 		for _, episode := range *animeWithEpisodes {
-			// if season is 0 then its a special so we skip it
-			//if episode.SeasonNumber != nil && *episode.SeasonNumber == 0 {
-			//	continue
-			//}
-			// convert int to string
-
-			if episode.SeasonNumber != nil && *episode.SeasonNumber != season {
-				continue
-			}
 			var titleEN *string
 			if episode.Translations["eng"] != nil {
 				titleEN = episode.Translations["eng"].Name
