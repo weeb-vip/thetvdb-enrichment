@@ -19,6 +19,7 @@ type AnimeWithEpisodes struct {
 type TheTVDBService interface {
 	FindAnime(ctx context.Context, title string, year string) (*AnimeWithEpisodes, error)
 	GetEpisodesBySeriesID(ctx context.Context, seriesID string, season *int) (*[]AnimeEpisodeWithTranslation, error)
+	GetSeriesBannerURL(ctx context.Context, seriesID string) (string, error)
 }
 
 // translation fetches cost one API call per episode per language, so only
@@ -109,4 +110,39 @@ func (s *TheTVDBServiceImpl) getEpisodeTranslation(ctx context.Context, episodeI
 
 func (s *TheTVDBServiceImpl) GetEpisodesBySeriesID(ctx context.Context, seriesID string, season *int) (*[]AnimeEpisodeWithTranslation, error) {
 	return s.getAnimeEpisodes(ctx, seriesID, season)
+}
+
+// GetSeriesBannerURL returns the best background artwork (tvdb type 3)
+// for a series, falling back to any artwork, then the series image
+func (s *TheTVDBServiceImpl) GetSeriesBannerURL(ctx context.Context, seriesID string) (string, error) {
+	series, err := s.api.GetSeriesExtended(ctx, seriesID)
+	if err != nil {
+		return "", err
+	}
+	if series == nil {
+		return "", nil
+	}
+
+	const artworkTypeSeriesBackground = 3
+	var best *thetvdb_api.Artwork
+	for i, artwork := range series.Artworks {
+		if artwork.Type == nil || *artwork.Type != artworkTypeSeriesBackground || artwork.Image == nil {
+			continue
+		}
+		if best == nil || (artwork.Score != nil && best.Score != nil && *artwork.Score > *best.Score) {
+			best = &series.Artworks[i]
+		}
+	}
+	if best != nil {
+		return *best.Image, nil
+	}
+	for _, artwork := range series.Artworks {
+		if artwork.Image != nil {
+			return *artwork.Image, nil
+		}
+	}
+	if series.Image != nil {
+		return *series.Image, nil
+	}
+	return "", nil
 }

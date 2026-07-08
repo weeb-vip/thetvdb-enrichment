@@ -13,6 +13,7 @@ type TheTVDBApi interface {
 	FindAnimeByTitle(ctx context.Context, title string) (*[]SearchResult, error)
 	GetEpisodesBySeriesID(ctx context.Context, seriesID string) (*GetSeriesEpisodesData, error)
 	GetEpisodeTranslation(ctx context.Context, episodeID string, lang string) (*Translation, error)
+	GetSeriesExtended(ctx context.Context, seriesID string) (*SeriesExtendedRecord, error)
 }
 
 type TheTVDBApiImpl struct {
@@ -141,6 +142,31 @@ func (t *TheTVDBApiImpl) GetEpisodeTranslation(ctx context.Context, episodeID st
 
 	err = json.NewDecoder(resp.Body).Decode(&responseData)
 
+	if err != nil {
+		return nil, err
+	}
+
+	return &responseData.Data, nil
+}
+
+func (t *TheTVDBApiImpl) GetSeriesExtended(ctx context.Context, seriesID string) (*SeriesExtendedRecord, error) {
+	var responseData Response[SeriesExtendedRecord]
+	// create http request with authorization token
+	req, err := http.NewRequest("GET", t.baseURL+"/series/"+seriesID+"/extended", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+*t.authorizationToken)
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	err = json.NewDecoder(resp.Body).Decode(&responseData)
 	if err != nil {
 		return nil, err
 	}

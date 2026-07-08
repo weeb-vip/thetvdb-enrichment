@@ -56,7 +56,10 @@ func EventingKafka() error {
 	episodeRepo := anime.NewAnimeEpisodeRepository(database)
 	animeRepo := anime2.NewAnimeRepository(database)
 
-	tvdbProcessor := thetvdb_processor_kafka.NewTheTVDBProcessor(thetvdbService, animeRepo, episodeRepo)
+	producerFunc := func(ctx context.Context, message *kafka.Message) error {
+		return driver.Produce(ctx, cfg.KafkaConfig.ProducerTopic, message)
+	}
+	tvdbProcessor := thetvdb_processor_kafka.NewTheTVDBProcessor(thetvdbService, animeRepo, episodeRepo, producerFunc)
 
 	processorInstance := processor.NewProcessor[*kafka.Message, thetvdb_processor_kafka.Payload](driver, cfg.KafkaConfig.Topic, tvdbProcessor.Process)
 

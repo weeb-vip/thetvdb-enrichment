@@ -10,3 +10,14 @@ type Schema struct {
 type Payload struct {
 	Data Schema `json:"data"`
 }
+
+type ImageSchema struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	Type string `json:"type"`
+}
+
+// ImagePayload is the envelope the image-sync kafka consumer expects
+type ImagePayload struct {
+	Data ImageSchema `json:"data"`
+}
