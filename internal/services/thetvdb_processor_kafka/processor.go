@@ -53,6 +53,7 @@ func (p *TheTVDBProcessorImpl) publishBanner(ctx context.Context, animeID string
 	}
 
 	payloadBytes, err := json.Marshal(ImagePayload{Data: ImageSchema{
+		ID:   animeID,
 		Name: animeID,
 		URL:  bannerURL,
 		Type: "Banner",
