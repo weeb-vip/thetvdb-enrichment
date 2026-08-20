@@ -33,6 +33,7 @@ Flags:
 		delayMs, _ := cmd.Flags().GetInt("delay-ms")
 		after, _ := cmd.Flags().GetString("after")
 		return eventing.SyncBanners(eventing.SyncBannersOptions{
+			Kind:    eventing.ArtworkBanner,
 			DryRun:  dryRun,
 			Limit:   limit,
 			DelayMs: delayMs,
