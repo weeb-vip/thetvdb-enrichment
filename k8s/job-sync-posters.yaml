@@ -1,0 +1,69 @@
+# One-off job: publish the tall 2:3 series poster for every anime carrying a
+# thetvdbid. Objects land at /posters/<id>, alongside the wide artwork
+# job-sync-banners.yaml publishes to /banners/<id>.
+#
+# The bucket root keeps the scraper's MyAnimeList image, which MAL serves at
+# 225px wide -- this is the high-resolution replacement the frontend prefers,
+# with the root image as its per-anime fallback.
+#
+# Runs in-cluster deliberately. The command produces to Kafka, and Kafka brokers
+# advertise internal addresses -- a producer running outside the cluster connects
+# to the bootstrap and then fails on the advertised broker address, so this
+# cannot be driven from a laptop over port-forward.
+#
+# Inherits DB, TheTVDB and Kafka config from the enrichment deployment's own
+# configmap, so there are no credentials in this file.
+#
+#   kubectl -n weeb-staging apply -f k8s/job-sync-banners.yaml
+#   kubectl -n weeb-staging logs -f job/thetvdb-sync-banners
+#
+# Set `image` to the tag CI published for the commit that added sync-posters.
+# 1.5.0 predates the command and will fail with "unknown command".
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: thetvdb-sync-posters
+spec:
+  # No automatic retry. A restarted run begins at the first anime again and
+  # republishes everything it already did; resume with --after <lastID> instead,
+  # which the command logs on completion and on failure.
+  backoffLimit: 0
+  # ~9.2k anime at 300ms plus a TheTVDB call each is roughly 70 minutes; this
+  # leaves headroom without letting a wedged run sit forever.
+  activeDeadlineSeconds: 14400
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      name: thetvdb-sync-posters
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: harbor
+      containers:
+        - name: thetvdb-enrichment
+          image: harbor.floret.dev/weeb-vip/thetvdb-enrichment:REPLACE_WITH_PUBLISHED_TAG
+          imagePullPolicy: IfNotPresent
+          # The image sets CMD ["./main", "serve"] with no ENTRYPOINT, so args
+          # alone would replace the whole command and exec "sync-posters" as a
+          # binary. command must be set explicitly, as the deployment does.
+          command: ["./main"]
+          args:
+            - "sync-posters"
+            # Per-anime pacing: each iteration is one TheTVDB call and one
+            # image-sync download. Raise it if TheTVDB starts throttling.
+            - "--delay-ms"
+            - "300"
+            # - "--dry-run"          # resolve and log, publish nothing
+            # - "--limit"            # stop after N anime
+            # - "50"
+            # - "--after"            # resume from an anime id (exclusive)
+            # - "<lastID from a previous run>"
+          envFrom:
+            - configMapRef:
+                name: thetvdb-enrichment-kafka-configmap
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              memory: 256Mi

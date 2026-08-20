@@ -20,6 +20,7 @@ type TheTVDBService interface {
 	FindAnime(ctx context.Context, title string, year string) (*AnimeWithEpisodes, error)
 	GetEpisodesBySeriesID(ctx context.Context, seriesID string, season *int) (*[]AnimeEpisodeWithTranslation, error)
 	GetSeriesBannerURL(ctx context.Context, seriesID string) (string, error)
+	GetSeriesPosterURL(ctx context.Context, seriesID string) (string, error)
 }
 
 // translation fetches cost one API call per episode per language, so only
@@ -140,6 +141,48 @@ func (s *TheTVDBServiceImpl) GetSeriesBannerURL(ctx context.Context, seriesID st
 		if artwork.Image != nil {
 			return *artwork.Image, nil
 		}
+	}
+	if series.Image != nil {
+		return *series.Image, nil
+	}
+	return "", nil
+}
+
+// GetSeriesPosterURL returns the best series poster (tvdb type 2), the tall 2:3
+// artwork -- roughly 680x1000, against the 225px MyAnimeList image the scraper
+// stores at an anime's bucket root.
+//
+// The fallback chain is deliberately shorter than GetSeriesBannerURL's. That one
+// ends with "any artwork at all", which is reasonable when the target is a wide
+// background and almost anything crops acceptably. Here it would be actively
+// harmful: falling through to an arbitrary artwork would put a 16:9 background
+// at /posters/<id>, and the frontend asks for that path precisely because it
+// wants a tall image. A show with no poster must publish nothing, so the
+// frontend falls back to the scraper's image rather than being handed the wrong
+// shape at full confidence.
+//
+// series.Image is kept because on TheTVDB that field is the series poster.
+func (s *TheTVDBServiceImpl) GetSeriesPosterURL(ctx context.Context, seriesID string) (string, error) {
+	series, err := s.api.GetSeriesExtended(ctx, seriesID)
+	if err != nil {
+		return "", err
+	}
+	if series == nil {
+		return "", nil
+	}
+
+	const artworkTypeSeriesPoster = 2
+	var best *thetvdb_api.Artwork
+	for i, artwork := range series.Artworks {
+		if artwork.Type == nil || *artwork.Type != artworkTypeSeriesPoster || artwork.Image == nil {
+			continue
+		}
+		if best == nil || (artwork.Score != nil && best.Score != nil && *artwork.Score > *best.Score) {
+			best = &series.Artworks[i]
+		}
+	}
+	if best != nil {
+		return *best.Image, nil
 	}
 	if series.Image != nil {
 		return *series.Image, nil
