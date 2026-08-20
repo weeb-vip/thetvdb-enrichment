@@ -1,4 +1,10 @@
-# One-off job: publish series artwork for every anime carrying a thetvdbid.
+# One-off job: publish the tall 2:3 series poster for every anime carrying a
+# thetvdbid. Objects land at /posters/<id>, alongside the wide artwork
+# job-sync-banners.yaml publishes to /banners/<id>.
+#
+# The bucket root keeps the scraper's MyAnimeList image, which MAL serves at
+# 225px wide -- this is the high-resolution replacement the frontend prefers,
+# with the root image as its per-anime fallback.
 #
 # Runs in-cluster deliberately. The command produces to Kafka, and Kafka brokers
 # advertise internal addresses -- a producer running outside the cluster connects
@@ -11,11 +17,12 @@
 #   kubectl -n weeb-staging apply -f k8s/job-sync-banners.yaml
 #   kubectl -n weeb-staging logs -f job/thetvdb-sync-banners
 #
-# Set `image` to the tag CI published for the commit that added sync-banners.
+# Set `image` to the tag CI published for the commit that added sync-posters.
+# 1.5.0 predates the command and will fail with "unknown command".
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: thetvdb-sync-banners
+  name: thetvdb-sync-posters
 spec:
   # No automatic retry. A restarted run begins at the first anime again and
   # republishes everything it already did; resume with --after <lastID> instead,
@@ -27,21 +34,21 @@ spec:
   ttlSecondsAfterFinished: 86400
   template:
     metadata:
-      name: thetvdb-sync-banners
+      name: thetvdb-sync-posters
     spec:
       restartPolicy: Never
       imagePullSecrets:
         - name: harbor
       containers:
         - name: thetvdb-enrichment
-          image: harbor.floret.dev/weeb-vip/thetvdb-enrichment:1.5.0
+          image: harbor.floret.dev/weeb-vip/thetvdb-enrichment:REPLACE_WITH_PUBLISHED_TAG
           imagePullPolicy: IfNotPresent
           # The image sets CMD ["./main", "serve"] with no ENTRYPOINT, so args
-          # alone would replace the whole command and exec "sync-banners" as a
+          # alone would replace the whole command and exec "sync-posters" as a
           # binary. command must be set explicitly, as the deployment does.
           command: ["./main"]
           args:
-            - "sync-banners"
+            - "sync-posters"
             # Per-anime pacing: each iteration is one TheTVDB call and one
             # image-sync download. Raise it if TheTVDB starts throttling.
             - "--delay-ms"

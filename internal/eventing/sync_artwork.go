@@ -19,7 +19,21 @@ import (
 	"net/http"
 )
 
+// ArtworkKind is which TheTVDB artwork a run publishes. The walk, the pacing,
+// the keyset paging and the resume are identical for both; only the resolver and
+// the image-sync data type differ, so they share one implementation rather than
+// two files that drift.
+type ArtworkKind string
+
+const (
+	ArtworkBanner ArtworkKind = "Banner"
+	ArtworkPoster ArtworkKind = "Poster"
+)
+
 type SyncBannersOptions struct {
+	// Kind defaults to ArtworkBanner when empty, so existing callers are
+	// unchanged.
+	Kind    ArtworkKind
 	DryRun  bool
 	Limit   int
 	DelayMs int
@@ -38,6 +52,9 @@ const pageSize = 200
 // Paced per anime because every iteration is a TheTVDB API call, and every
 // publish becomes an image-sync download.
 func SyncBanners(opts SyncBannersOptions) error {
+	if opts.Kind == "" {
+		opts.Kind = ArtworkBanner
+	}
 	cfg := config.LoadConfigOrPanic()
 	ctx := context.Background()
 	log := logger.Get()
@@ -67,7 +84,8 @@ func SyncBanners(opts SyncBannersOptions) error {
 		failed    int
 	)
 
-	log.Info("Starting banner sync",
+	log.Info("Starting artwork sync",
+		zap.String("artwork", string(opts.Kind)),
 		zap.Bool("dryRun", opts.DryRun),
 		zap.Int("limit", opts.Limit),
 		zap.Int("delayMs", opts.DelayMs),
@@ -93,7 +111,12 @@ func SyncBanners(opts SyncBannersOptions) error {
 				continue
 			}
 
-			bannerURL, err := thetvdbService.GetSeriesBannerURL(ctx, *record.TheTVDBID)
+			var artworkURL string
+			if opts.Kind == ArtworkPoster {
+				artworkURL, err = thetvdbService.GetSeriesPosterURL(ctx, *record.TheTVDBID)
+			} else {
+				artworkURL, err = thetvdbService.GetSeriesBannerURL(ctx, *record.TheTVDBID)
+			}
 			if err != nil {
 				failed++
 				log.Warn("Failed to fetch artwork",
@@ -102,33 +125,37 @@ func SyncBanners(opts SyncBannersOptions) error {
 					zap.Error(err))
 				continue
 			}
-			if bannerURL == "" {
+			// Nothing of the right shape exists for this show. Publishing a
+			// fallback of the wrong aspect would be worse than publishing
+			// nothing: the frontend falls back per-anime on a missing object.
+			if artworkURL == "" {
 				noArtwork++
 				continue
 			}
 
 			if opts.DryRun {
 				published++
-				log.Info("Would publish banner",
+				log.Info("Would publish artwork",
+					zap.String("artwork", string(opts.Kind)),
 					zap.String("anime_id", record.ID),
-					zap.String("url", bannerURL))
+					zap.String("url", artworkURL))
 			} else {
 				payload, err := json.Marshal(thetvdb_processor_kafka.ImagePayload{
 					Data: thetvdb_processor_kafka.ImageSchema{
 						ID:   record.ID,
 						Name: record.ID,
-						URL:  bannerURL,
-						Type: "Banner",
+						URL:  artworkURL,
+						Type: string(opts.Kind),
 					},
 				})
 				if err != nil {
 					failed++
-					log.Warn("Failed to marshal banner payload", zap.Error(err))
+					log.Warn("Failed to marshal artwork payload", zap.Error(err))
 					continue
 				}
 				if err := driver.Produce(ctx, cfg.KafkaConfig.ProducerTopic, &kafka.Message{Value: payload}); err != nil {
 					failed++
-					log.Warn("Failed to publish banner", zap.String("anime_id", record.ID), zap.Error(err))
+					log.Warn("Failed to publish artwork", zap.String("anime_id", record.ID), zap.Error(err))
 					continue
 				}
 				published++
@@ -155,7 +182,8 @@ func SyncBanners(opts SyncBannersOptions) error {
 		}
 	}
 
-	log.Info("Banner sync complete",
+	log.Info("Artwork sync complete",
+		zap.String("artwork", string(opts.Kind)),
 		zap.Int("processed", processed),
 		zap.Int("published", published),
 		zap.Int("noArtwork", noArtwork),
