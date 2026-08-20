@@ -34,8 +34,12 @@ spec:
         - name: harbor
       containers:
         - name: thetvdb-enrichment
-          image: harbor.floret.dev/weeb-vip/thetvdb-enrichment:REPLACE_WITH_TAG
+          image: harbor.floret.dev/weeb-vip/thetvdb-enrichment:1.5.0
           imagePullPolicy: IfNotPresent
+          # The image sets CMD ["./main", "serve"] with no ENTRYPOINT, so args
+          # alone would replace the whole command and exec "sync-banners" as a
+          # binary. command must be set explicitly, as the deployment does.
+          command: ["./main"]
           args:
             - "sync-banners"
             # Per-anime pacing: each iteration is one TheTVDB call and one
