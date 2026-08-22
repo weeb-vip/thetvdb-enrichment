@@ -23,8 +23,8 @@ type DBConfig struct {
 	DataBase string `default:"weeb" env:"DBNAME"`
 	User     string `default:"weeb" env:"DBUSERNAME"`
 	Password string `required:"true" env:"DBPASSWORD" default:"mysecretpassword"`
-	Port     uint   `default:"3306" env:"DBPORT"`
-	SSLMode  string `default:"false" env:"DBSSL"`
+	Port     uint   `default:"5432" env:"DBPORT"`
+	SSLMode  string `default:"require" env:"DBSSL"`
 }
 
 type PulsarConfig struct {
