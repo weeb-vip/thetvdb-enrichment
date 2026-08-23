@@ -7,9 +7,9 @@ import (
 type Config struct {
 	AppConfig     AppConfig `env:"APP_CONFIG"`
 	DBConfig      DBConfig
-	PulsarConfig  PulsarConfig
 	TheTVDBConfig TheTVDBConfig `env:"THETVDB"`
 	KafkaConfig   KafkaConfig
+	NatsConfig    NatsConfig
 }
 
 type AppConfig struct {
@@ -27,12 +27,6 @@ type DBConfig struct {
 	SSLMode  string `default:"require" env:"DBSSL"`
 }
 
-type PulsarConfig struct {
-	URL              string `default:"pulsar://localhost:6650" env:"PULSARURL"`
-	Topic            string `default:"public/default/myanimelist.public.anime" env:"PULSARTOPIC"`
-	SubscribtionName string `default:"my-sub" env:"PULSARSUBSCRIPTIONNAME"`
-}
-
 type KafkaConfig struct {
 	ConsumerGroupName string `default:"image-sync-group" env:"KAFKA_CONSUMER_GROUP_NAME"`
 	BootstrapServers  string `default:"localhost:9092" env:"KAFKA_BOOTSTRAP_SERVERS"`
@@ -44,6 +38,28 @@ type KafkaConfig struct {
 type TheTVDBConfig struct {
 	APIKey string `default:"" env:"API_KEY"`
 	APIPIN string `default:"" env:"API_PIN"`
+}
+
+// NatsConfig mirrors KafkaConfig, so moving between the two is one substitution
+// per setting.
+type NatsConfig struct {
+	URL string `default:"nats://localhost:4222" env:"NATSURL"`
+
+	// The durable consumer name -- the closest equivalent to a Kafka consumer
+	// group. Left empty the consumer is ephemeral and loses its position on
+	// restart.
+	ConsumerGroupName string `default:"thetvdb-enrichment-nats" env:"NATSCONSUMERGROUPNAME"`
+
+	// Empty on purpose, unlike the CDC consumers: thetvdb-enrichment.anime is
+	// produced by the sync services rather than Debezium, so no other stream
+	// declares it and the driver should create one from the subject.
+	StreamName string `env:"NATSSTREAMNAME"`
+
+	Offset string `default:"earliest" env:"NATSOFFSET"`
+
+	Subject string `default:"thetvdb-enrichment.anime" env:"NATSSUBJECT"`
+
+	ProducerSubject string `default:"image-sync" env:"NATSPRODUCERSUBJECT"`
 }
 
 func LoadConfigOrPanic() Config {

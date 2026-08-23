@@ -13,7 +13,7 @@ import (
 	anime2 "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/logger"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_api"
-	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_processor_kafka"
+	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_processor"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_service"
 	"go.uber.org/zap"
 	"net/http"
@@ -140,8 +140,8 @@ func SyncBanners(opts SyncBannersOptions) error {
 					zap.String("anime_id", record.ID),
 					zap.String("url", artworkURL))
 			} else {
-				payload, err := json.Marshal(thetvdb_processor_kafka.ImagePayload{
-					Data: thetvdb_processor_kafka.ImageSchema{
+				payload, err := json.Marshal(thetvdb_processor.ImagePayload{
+					Data: thetvdb_processor.ImageSchema{
 						ID:   record.ID,
 						Name: record.ID,
 						URL:  artworkURL,

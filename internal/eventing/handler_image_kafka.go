@@ -13,7 +13,7 @@ import (
 	anime "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime_episode"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/logger"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_api"
-	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_processor_kafka"
+	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_processor"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_service"
 	"go.uber.org/zap"
 	"net/http"
@@ -56,15 +56,18 @@ func EventingKafka() error {
 	episodeRepo := anime.NewAnimeEpisodeRepository(database)
 	animeRepo := anime2.NewAnimeRepository(database)
 
-	producerFunc := func(ctx context.Context, message *kafka.Message) error {
-		return driver.Produce(ctx, cfg.KafkaConfig.ProducerTopic, message)
+	// Takes the encoded value rather than a *kafka.Message: the processor is
+	// generic over the driver message now, so building the transport's message
+	// is this closure's job.
+	producerFunc := func(ctx context.Context, value []byte) error {
+		return driver.Produce(ctx, cfg.KafkaConfig.ProducerTopic, &kafka.Message{Value: value})
 	}
-	tvdbProcessor := thetvdb_processor_kafka.NewTheTVDBProcessor(thetvdbService, animeRepo, episodeRepo, producerFunc)
+	tvdbProcessor := thetvdb_processor.NewTheTVDBProcessor[*kafka.Message](thetvdbService, animeRepo, episodeRepo, producerFunc)
 
-	processorInstance := processor.NewProcessor[*kafka.Message, thetvdb_processor_kafka.Payload](driver, cfg.KafkaConfig.Topic, tvdbProcessor.Process)
+	processorInstance := processor.NewProcessor[*kafka.Message, thetvdb_processor.Payload](driver, cfg.KafkaConfig.Topic, tvdbProcessor.Process)
 
 	log.Info("initializing backoff retry middleware", zap.String("topic", cfg.KafkaConfig.Topic))
-	backoffRetryInstance := backoffretry.NewBackoffRetry[thetvdb_processor_kafka.Payload](driver, backoffretry.Config{
+	backoffRetryInstance := backoffretry.NewBackoffRetry[thetvdb_processor.Payload](driver, backoffretry.Config{
 		MaxRetries: 3,
 		HeaderKey:  "retry",
 		RetryQueue: cfg.KafkaConfig.Topic + "-retry",
