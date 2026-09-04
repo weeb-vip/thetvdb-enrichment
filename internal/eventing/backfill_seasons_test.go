@@ -14,91 +14,133 @@ func ep(season int, aired string) thetvdb_api.EpisodeBaseRecord {
 	return thetvdb_api.EpisodeBaseRecord{SeasonNumber: &s, Aired: &a}
 }
 
-// The real shape of TheTVDB series 79414, which is the case this was written
-// for: MyAnimeList splits it into two anime, TheTVDB keeps it as one series
-// with two seasons, and only the air dates tell them apart.
-func haruhiWindows() []seasonWindow {
-	return seasonWindows([]thetvdb_api.EpisodeBaseRecord{
+func days(t *testing.T, values ...string) []time.Time {
+	t.Helper()
+	out := make([]time.Time, 0, len(values))
+	for _, v := range values {
+		parsed, err := time.Parse(thetvdbDateLayout, v)
+		if err != nil {
+			t.Fatalf("bad test date %q: %v", v, err)
+		}
+		out = append(out, parsed)
+	}
+
+	return out
+}
+
+// TheTVDB series 79414 as the API actually returns it. This is the case the
+// command exists for: MyAnimeList splits it into two anime, TheTVDB keeps one
+// series with two seasons, and only the air dates connect them.
+func haruhi() []thetvdb_api.EpisodeBaseRecord {
+	return []thetvdb_api.EpisodeBaseRecord{
 		ep(0, "2010-02-06"),
-		ep(1, "2006-04-03"), ep(1, "2006-05-15"), ep(1, "2006-07-03"),
-		ep(2, "2009-05-22"), ep(2, "2009-06-19"), ep(2, "2009-09-11"),
-	})
-}
-
-func TestSeasonWindowsGroupsBySeason(t *testing.T) {
-	windows := haruhiWindows()
-
-	if len(windows) != 3 {
-		t.Fatalf("want 3 seasons, got %d", len(windows))
-	}
-	if windows[0].number != 0 || windows[1].number != 1 || windows[2].number != 2 {
-		t.Fatalf("seasons out of order: %+v", windows)
-	}
-	if got := windows[1].first.Format(thetvdbDateLayout); got != "2006-04-03" {
-		t.Errorf("season 1 first aired = %s, want 2006-04-03", got)
-	}
-	if got := windows[1].last.Format(thetvdbDateLayout); got != "2006-07-03" {
-		t.Errorf("season 1 last aired = %s, want 2006-07-03", got)
+		ep(1, "2006-04-03"), ep(1, "2006-04-10"), ep(1, "2006-04-17"), ep(1, "2006-07-03"),
+		ep(2, "2009-05-22"), ep(2, "2009-06-19"), ep(2, "2009-06-26"), ep(2, "2009-07-03"),
+		ep(2, "2009-07-10"), ep(2, "2009-07-17"), ep(2, "2009-07-24"), ep(2, "2009-07-31"),
+		ep(2, "2009-08-07"), ep(2, "2009-09-11"),
 	}
 }
 
-func TestMatchSeasonPicksTheRightRun(t *testing.T) {
-	windows := haruhiWindows()
+func TestMatchByEpisodesJoinsOnAirDays(t *testing.T) {
+	airDays := seasonAirDays(haruhi())
 
 	for _, tc := range []struct {
-		name  string
-		start string
-		want  int
+		name string
+		ours []time.Time
+		want int
 	}{
-		{"the 2006 anime is season 1", "2006-04-03", 1},
-		{"the 2009 anime is season 2", "2009-05-22", 2},
-		{"the 2010 film is the specials season", "2010-02-06", 0},
+		{
+			name: "the 2006 anime is season 1",
+			ours: days(t, "2006-04-03", "2006-04-10", "2006-04-17", "2006-07-03"),
+			want: 1,
+		},
+		{
+			name: "the 2009 anime is season 2",
+			ours: days(t, "2009-05-22", "2009-06-19", "2009-06-26", "2009-07-03",
+				"2009-07-10", "2009-07-17", "2009-07-24", "2009-07-31", "2009-08-07", "2009-09-11"),
+			want: 2,
+		},
+		{
+			// TheTVDB and MyAnimeList disagree about a delayed broadcast often
+			// enough that demanding every episode would reject correct matches.
+			name: "nine of ten still matches",
+			ours: days(t, "2009-05-22", "2009-06-19", "2009-06-26", "2009-07-03",
+				"2009-07-10", "2009-07-17", "2009-07-24", "2009-07-31", "2009-08-07", "2011-01-01"),
+			want: 2,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			start, _ := time.Parse(thetvdbDateLayout, tc.start)
-			got, ok := matchSeason(start, windows, defaultToleranceDays)
+			got, ok := matchByEpisodes(tc.ours, airDays, defaultRequiredRatio)
 			if !ok {
-				t.Fatalf("no match for %s", tc.start)
+				t.Fatalf("no match")
 			}
-			if got.number != tc.want {
-				t.Errorf("season = %d, want %d", got.number, tc.want)
+			if got != tc.want {
+				t.Errorf("season = %d, want %d", got, tc.want)
 			}
 		})
 	}
 }
 
-// The guard that keeps this from inventing seasons. An anime sharing a series
-// id but airing years from any known season -- a spin-off, a recap special the
-// series record does not list -- must come back unmatched so the column stays
-// null rather than wrong.
-func TestMatchSeasonRefusesWhenNothingIsClose(t *testing.T) {
-	start, _ := time.Parse(thetvdbDateLayout, "2015-10-01")
+// The refusals. Each of these would previously have been answered with a
+// nearest-season guess, and each would have written a wrong season.
+func TestMatchByEpisodesRefusesRatherThanGuess(t *testing.T) {
+	airDays := seasonAirDays(haruhi())
 
-	if _, ok := matchSeason(start, haruhiWindows(), defaultToleranceDays); ok {
-		t.Error("matched a season five years from any air date; want no match")
+	for _, tc := range []struct {
+		name string
+		ours []time.Time
+	}{
+		{
+			name: "a spin-off sharing the series id but airing on its own days",
+			ours: days(t, "2015-10-07", "2015-10-14", "2015-10-21"),
+		},
+		{
+			name: "too few of our episodes land on the season's days",
+			ours: days(t, "2009-05-22", "2009-06-19", "2011-01-08", "2011-01-15", "2011-01-22"),
+		},
+		{
+			name: "an anime we hold no dated episodes for",
+			ours: nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if season, ok := matchByEpisodes(tc.ours, airDays, defaultRequiredRatio); ok {
+				t.Errorf("matched season %d; want a refusal", season)
+			}
+		})
 	}
 }
 
-func TestMatchSeasonIgnoresSeasonsWithNoAirDates(t *testing.T) {
-	s := 3
-	windows := seasonWindows([]thetvdb_api.EpisodeBaseRecord{
-		ep(1, "2006-04-03"),
-		{SeasonNumber: &s}, // announced, nothing aired
+// A tie is a refusal: if two seasons explain our episodes equally well we
+// cannot say which one this anime is.
+func TestMatchByEpisodesRefusesATie(t *testing.T) {
+	airDays := seasonAirDays([]thetvdb_api.EpisodeBaseRecord{
+		ep(1, "2020-01-05"), ep(2, "2020-01-05"),
 	})
-	start, _ := time.Parse(thetvdbDateLayout, "2006-04-05")
 
-	got, ok := matchSeason(start, windows, defaultToleranceDays)
-	if !ok || got.number != 1 {
-		t.Errorf("got season %d ok=%v, want season 1", got.number, ok)
+	if season, ok := matchByEpisodes(days(t, "2020-01-05"), airDays, 1.0); ok {
+		t.Errorf("matched season %d on a tie; want a refusal", season)
+	}
+}
+
+func TestMatchByExactStartRequiresExactness(t *testing.T) {
+	windows := seasonWindows(haruhi())
+
+	start := days(t, "2009-05-22")[0]
+	if got, ok := matchByExactStart(start, windows); !ok || got != 2 {
+		t.Errorf("exact start: got season %d ok=%v, want season 2", got, ok)
+	}
+
+	// One day off is not a match. The old rule allowed 45 days of slack, which
+	// is how a spin-off premiering near a season boundary got mislabelled.
+	off := days(t, "2009-05-23")[0]
+	if season, ok := matchByExactStart(off, windows); ok {
+		t.Errorf("matched season %d one day off; want a refusal", season)
 	}
 }
 
 func TestParseFlexibleDateHandlesEveryShapeStartDateArrivesIn(t *testing.T) {
-	for _, in := range []string{
-		"2006-04-03",
-		"2006-04-03T04:00:00Z",
-		"2006-04-03 04:00:00+00",
-	} {
+	for _, in := range []string{"2006-04-03", "2006-04-03T04:00:00Z", "2006-04-03 04:00:00+00"} {
 		got, ok := parseFlexibleDate(in)
 		if !ok {
 			t.Errorf("%q did not parse", in)

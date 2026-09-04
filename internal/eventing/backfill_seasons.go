@@ -13,6 +13,7 @@ import (
 	"github.com/weeb-vip/thetvdb-enrichment/config"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/db"
 	anime2 "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime"
+	animeepisode "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime_episode"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/thetvdblink"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/logger"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_api"
@@ -25,10 +26,16 @@ import (
 // show. 1,756 TheTVDB ids are shared by 6,425 of our anime -- 76 of them are
 // Pokemon -- and nothing until now said which run any of them was.
 //
-// The air dates say it. Haruhi's TheTVDB season 1 ran 2006-04-03 to 2006-07-03
-// and season 2 ran 2009-05-22 to 2009-09-11; our two rows carry exactly those
-// dates. Matching a start date to a season's window is enough, and where it is
-// not obviously enough this refuses to guess.
+// TheTVDB cannot be asked directly: its series carry remote ids for TheMovieDB
+// and IMDB only, and its season records carry none at all, so nothing on that
+// side knows a MyAnimeList entry exists. The only keys the two systems share
+// are air dates.
+//
+// So this joins on those, and only where the join is exact. Our 2006 Haruhi
+// row's episodes aired 2006-04-03, 04-10, 04-17 ... and TheTVDB season 1's
+// episodes aired on those same days; that is a join, not a guess. Anything
+// short of agreement writes nothing and leaves the season unknown, because a
+// blank field is honest and a wrong season is not.
 
 // seasonWindow is one season's air range, as TheTVDB reports it.
 type seasonWindow struct {
@@ -43,14 +50,14 @@ type BackfillSeasonsOptions struct {
 	Limit   int
 	DelayMs int
 	After   string
-	// ToleranceDays is how far an anime's start date may sit from a season's
-	// first episode and still be called a match.
-	ToleranceDays int
+	// RequiredRatio is the share of an anime's dated episodes that must land on
+	// a season's air days for that season to be accepted.
+	RequiredRatio float64
 }
 
 const (
 	backfillPageSize      = 100
-	defaultToleranceDays  = 45
+	defaultRequiredRatio  = 0.8
 	thetvdbDateLayout     = "2006-01-02"
 	animeStartDateLayouts = "2006-01-02T15:04:05Z07:00|2006-01-02 15:04:05-07|2006-01-02"
 )
@@ -79,6 +86,27 @@ func parseFlexibleDate(value string) (time.Time, bool) {
 	}
 
 	return time.Time{}, false
+}
+
+// seasonAirDays is the set of calendar days each season aired on, which is what
+// the episode match joins against.
+func seasonAirDays(episodes []thetvdb_api.EpisodeBaseRecord) map[int]map[string]bool {
+	days := map[int]map[string]bool{}
+	for _, ep := range episodes {
+		if ep.SeasonNumber == nil || ep.Aired == nil {
+			continue
+		}
+		aired, err := time.Parse(thetvdbDateLayout, *ep.Aired)
+		if err != nil {
+			continue
+		}
+		if days[*ep.SeasonNumber] == nil {
+			days[*ep.SeasonNumber] = map[string]bool{}
+		}
+		days[*ep.SeasonNumber][dayKey(aired)] = true
+	}
+
+	return days
 }
 
 // seasonWindows groups a series' episodes into per-season air ranges.
@@ -129,42 +157,89 @@ func seasonWindows(episodes []thetvdb_api.EpisodeBaseRecord) []seasonWindow {
 	return windows
 }
 
-// matchSeason picks the season whose first episode sits closest to the anime's
-// start date, or reports no match.
+// dayKey reduces a timestamp to the calendar day, which is the granularity
+// both sides agree on: TheTVDB publishes dates, we store timestamps.
+func dayKey(t time.Time) string {
+	return t.UTC().Format(thetvdbDateLayout)
+}
+
+// matchByEpisodes picks the season whose episodes aired on the same days as
+// this anime's.
 //
-// Closest-start rather than "start falls inside the window", because a run that
-// begins a few days before its first listed episode is common and an interval
-// test would reject it. The tolerance is what stops that becoming a guess: a
-// show whose nearest season is months away gets no link at all, which is the
-// honest answer and leaves the field null rather than wrong.
-func matchSeason(start time.Time, windows []seasonWindow, toleranceDays int) (seasonWindow, bool) {
-	best := seasonWindow{}
-	found := false
-	var bestGap time.Duration
+// This is the rule that makes the result data rather than a guess. It needs
+// most of our episodes accounted for, and it needs one season to explain them
+// better than any other -- a series whose seasons were re-cut, or an anime
+// whose episode list we only half hold, produces a tie and is left alone.
+//
+// requiredRatio is deliberately not 1.0: TheTVDB and MyAnimeList disagree about
+// a recap or a delayed broadcast often enough that demanding every episode
+// would reject correct matches. It is high enough that a season can only win by
+// actually being the season.
+func matchByEpisodes(ourAired []time.Time, seasonDays map[int]map[string]bool, requiredRatio float64) (int, bool) {
+	if len(ourAired) == 0 {
+		return 0, false
+	}
 
-	for _, window := range windows {
-		if window.first.IsZero() {
-			continue
+	ours := map[string]bool{}
+	for _, t := range ourAired {
+		ours[dayKey(t)] = true
+	}
+
+	bestSeason, bestHits, runnerUp := 0, 0, 0
+	for season, days := range seasonDays {
+		hits := 0
+		for day := range ours {
+			if days[day] {
+				hits++
+			}
 		}
-		gap := start.Sub(window.first)
-		if gap < 0 {
-			gap = -gap
-		}
-		if !found || gap < bestGap {
-			best, bestGap, found = window, gap, true
+		if hits > bestHits {
+			bestSeason, bestHits, runnerUp = season, hits, bestHits
+		} else if hits > runnerUp {
+			runnerUp = hits
 		}
 	}
 
-	if !found || bestGap > time.Duration(toleranceDays)*24*time.Hour {
-		return seasonWindow{}, false
+	if bestHits == 0 {
+		return 0, false
+	}
+	// Ambiguity is a refusal. Two seasons explaining our episodes equally well
+	// means we cannot tell which one this is.
+	if bestHits == runnerUp {
+		return 0, false
+	}
+	if float64(bestHits)/float64(len(ours)) < requiredRatio {
+		return 0, false
 	}
 
-	return best, true
+	return bestSeason, true
+}
+
+// matchByExactStart is the fallback for anime whose episodes we do not hold.
+//
+// Exact equality, not proximity: the anime's first day must be the day a
+// season began, and exactly one season must begin on it. A "closest season
+// within N days" rule would happily label a spin-off that premiered near a
+// season boundary, which is the failure this whole command exists to avoid.
+func matchByExactStart(start time.Time, windows []seasonWindow) (int, bool) {
+	season, found := 0, 0
+	for _, w := range windows {
+		if !w.first.IsZero() && dayKey(w.first) == dayKey(start) {
+			season = w.number
+			found++
+		}
+	}
+
+	if found != 1 {
+		return 0, false
+	}
+
+	return season, true
 }
 
 func BackfillSeasons(opts BackfillSeasonsOptions) error {
-	if opts.ToleranceDays <= 0 {
-		opts.ToleranceDays = defaultToleranceDays
+	if opts.RequiredRatio <= 0 {
+		opts.RequiredRatio = defaultRequiredRatio
 	}
 
 	cfg := config.LoadConfigOrPanic()
@@ -175,11 +250,16 @@ func BackfillSeasons(opts BackfillSeasonsOptions) error {
 	api := thetvdb_api.NewTheTVDBApi(cfg.TheTVDBConfig, &http.Client{})
 	database := db.NewDB(cfg.DBConfig)
 	animeRepo := anime2.NewAnimeRepository(database)
+	episodeRepo := animeepisode.NewAnimeEpisodeRepository(database)
 	linkRepo := thetvdblink.NewTheTVDBLinkRepository(database)
 
 	// One fetch per series, not per anime. A series with 76 anime pointing at
 	// it -- Pokemon does -- would otherwise be fetched 76 times.
-	seriesCache := map[string][]seasonWindow{}
+	type seriesSeasons struct {
+		windows []seasonWindow
+		days    map[int]map[string]bool
+	}
+	seriesCache := map[string]seriesSeasons{}
 
 	var (
 		after     = opts.After
@@ -192,7 +272,7 @@ func BackfillSeasons(opts BackfillSeasonsOptions) error {
 	log.Info("Starting season backfill",
 		zap.Bool("dryRun", opts.DryRun),
 		zap.Int("limit", opts.Limit),
-		zap.Int("toleranceDays", opts.ToleranceDays))
+		zap.Float64("requiredRatio", opts.RequiredRatio))
 
 	for {
 		records, err := animeRepo.FindWithTheTVDBID(ctx, after, backfillPageSize)
@@ -222,7 +302,7 @@ func BackfillSeasons(opts BackfillSeasonsOptions) error {
 			}
 
 			seriesID := *record.TheTVDBID
-			windows, cached := seriesCache[seriesID]
+			series, cached := seriesCache[seriesID]
 			if !cached {
 				data, err := api.GetEpisodesBySeriesID(ctx, seriesID)
 				if err != nil {
@@ -231,31 +311,57 @@ func BackfillSeasons(opts BackfillSeasonsOptions) error {
 					failed++
 					continue
 				}
-				windows = seasonWindows(data.Episodes)
-				seriesCache[seriesID] = windows
+				series = seriesSeasons{
+					windows: seasonWindows(data.Episodes),
+					days:    seasonAirDays(data.Episodes),
+				}
+				seriesCache[seriesID] = series
 
 				if opts.DelayMs > 0 {
 					time.Sleep(time.Duration(opts.DelayMs) * time.Millisecond)
 				}
 			}
 
-			window, matched := matchSeason(start, windows, opts.ToleranceDays)
+			// Episodes first: agreement on air days is evidence, a start date
+			// landing on a season boundary is only a coincidence that usually
+			// holds.
+			ourEpisodes, err := episodeRepo.FindByAnimeID(ctx, record.ID)
+			if err != nil {
+				log.Warn("Failed to read episodes",
+					zap.String("animeID", record.ID), zap.String("error", err.Error()))
+				failed++
+				continue
+			}
+			aired := make([]time.Time, 0, len(ourEpisodes))
+			for _, e := range ourEpisodes {
+				if e.Aired != nil {
+					aired = append(aired, *e.Aired)
+				}
+			}
+
+			seasonNumber, matched := matchByEpisodes(aired, series.days, opts.RequiredRatio)
+			how := "episodes"
+			if !matched {
+				seasonNumber, matched = matchByExactStart(start, series.windows)
+				how = "exact-start"
+			}
 			if !matched {
 				skipped++
 				continue
 			}
 
-			name := fmt.Sprintf("season %d", window.number)
+			name := fmt.Sprintf("season %d", seasonNumber)
 			if record.TitleEn != nil && *record.TitleEn != "" {
-				name = fmt.Sprintf("%s (season %d)", *record.TitleEn, window.number)
+				name = fmt.Sprintf("%s (season %d)", *record.TitleEn, seasonNumber)
 			}
 
 			log.Info("Matched season",
 				zap.String("animeID", record.ID),
 				zap.String("seriesID", seriesID),
-				zap.Int("season", window.number),
-				zap.String("start", start.Format(thetvdbDateLayout)),
-				zap.String("seasonFirstAired", window.first.Format(thetvdbDateLayout)))
+				zap.Int("season", seasonNumber),
+				zap.String("how", how),
+				zap.Int("ourDatedEpisodes", len(aired)),
+				zap.String("start", start.Format(thetvdbDateLayout)))
 
 			if opts.DryRun {
 				linked++
@@ -265,7 +371,7 @@ func BackfillSeasons(opts BackfillSeasonsOptions) error {
 			if err := linkRepo.Upsert(ctx, &thetvdblink.TheTVDBLink{
 				AnimeID:      record.ID,
 				TheTVDBID:    seriesID,
-				SeasonNumber: window.number,
+				SeasonNumber: seasonNumber,
 				Name:         &name,
 			}); err != nil {
 				log.Error("Failed to write link",
