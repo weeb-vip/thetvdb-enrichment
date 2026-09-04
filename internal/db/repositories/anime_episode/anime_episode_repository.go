@@ -13,6 +13,9 @@ type AnimeEpisodeRepositoryImpl interface {
 	Upsert(ctx context.Context, anime *AnimeEpisode) error
 	Delete(ctx context.Context, anime *AnimeEpisode) error
 	DeleteByAnimeID(ctx context.Context, animeID string) error
+	// FindByAnimeID returns an anime's episodes. The season backfill reads
+	// their air dates to decide which TheTVDB season an anime is.
+	FindByAnimeID(ctx context.Context, animeID string) ([]*AnimeEpisode, error)
 }
 
 type AnimeEpisodeRepository struct {
@@ -62,4 +65,14 @@ func (a *AnimeEpisodeRepository) DeleteByAnimeID(ctx context.Context, animeID st
 		return err
 	}
 	return nil
+}
+
+func (a *AnimeEpisodeRepository) FindByAnimeID(ctx context.Context, animeID string) ([]*AnimeEpisode, error) {
+	var found []*AnimeEpisode
+	err := a.db.DB.WithContext(ctx).Where("anime_id = ?", animeID).Find(&found).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return found, nil
 }
