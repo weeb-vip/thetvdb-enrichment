@@ -18,6 +18,9 @@ type ImageSchema struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
 	Type string `json:"type"`
+	// Force asks image-sync to store and announce the image even when it
+	// already holds this source: the artwork sync's --force.
+	Force bool `json:"force,omitempty"`
 }
 
 // ImagePayload is the envelope the image-sync kafka consumer expects
