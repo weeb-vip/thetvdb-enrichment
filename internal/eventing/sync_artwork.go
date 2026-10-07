@@ -14,6 +14,7 @@ import (
 	"github.com/weeb-vip/thetvdb-enrichment/internal/db"
 	anime2 "github.com/weeb-vip/thetvdb-enrichment/internal/db/repositories/anime"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/logger"
+	"github.com/weeb-vip/thetvdb-enrichment/internal/services/artwork"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_api"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_processor"
 	"github.com/weeb-vip/thetvdb-enrichment/internal/services/thetvdb_service"
@@ -117,20 +118,33 @@ func SyncBanners(opts SyncBannersOptions) error {
 		failed    int
 	)
 
+	selection := artwork.Selection{Season: opts.Season, IDs: opts.IDs, After: opts.After, PageSize: pageSize}
+	walk := artwork.NewWalk(animeRepo, selection)
+	noTVDB := 0
+
 	log.Info("Starting artwork sync",
 		zap.String("artwork", string(opts.Kind)),
 		zap.Bool("dryRun", opts.DryRun),
+		zap.Bool("force", opts.Force),
+		zap.String("transport", opts.Transport),
+		zap.String("season", opts.Season),
+		zap.Int("ids", len(opts.IDs)),
+		zap.Bool("targeted", selection.Targeted()),
 		zap.Int("limit", opts.Limit),
 		zap.Int("delayMs", opts.DelayMs),
+		zap.String("producerSubject", cfg.NatsConfig.ProducerSubject),
 		zap.String("producerTopic", cfg.KafkaConfig.ProducerTopic))
 
 	for {
-		records, err := animeRepo.FindWithTheTVDBID(ctx, after, pageSize)
+		records, err := walk.Next(ctx)
 		if err != nil {
 			return err
 		}
 		if len(records) == 0 {
 			break
+		}
+		if selection.Targeted() {
+			log.Info("Target set", zap.Int("anime", len(records)), zap.String("season", opts.Season), zap.Int("ids", len(opts.IDs)))
 		}
 
 		for _, record := range records {
@@ -141,6 +155,10 @@ func SyncBanners(opts SyncBannersOptions) error {
 			processed++
 
 			if record.TheTVDBID == nil || *record.TheTVDBID == "" {
+				noTVDB++
+				if selection.Targeted() {
+					log.Info("No thetvdbid on record, nothing to resolve", zap.String("anime_id", record.ID))
+				}
 				continue
 			}
 
@@ -211,7 +229,7 @@ func SyncBanners(opts SyncBannersOptions) error {
 		if opts.Limit > 0 && processed >= opts.Limit {
 			break
 		}
-		if len(records) < pageSize {
+		if walk.Done() {
 			break
 		}
 	}
@@ -221,6 +239,7 @@ func SyncBanners(opts SyncBannersOptions) error {
 		zap.Int("processed", processed),
 		zap.Int("published", published),
 		zap.Int("noArtwork", noArtwork),
+		zap.Int("noTVDBID", noTVDB),
 		zap.Int("failed", failed),
 		zap.String("lastID", after))
 	return nil
