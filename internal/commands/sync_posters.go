@@ -34,26 +34,22 @@ Flags:
   --dry-run        resolve and log, publish nothing
   --limit N        stop after N anime (0 = all)
   --delay-ms N     pause between anime, to stay under TheTVDB rate limits
-  --after ID       resume from an anime id (exclusive)`,
+  --after ID       resume from an anime id (exclusive)
+  --season S       only one season's anime, e.g. FALL_2026
+  --ids / --ids-file
+                   only the given anime
+  --force          ask image-sync to re-pull even artwork it already holds
+  --transport T    nats (default) or kafka, wherever image-sync listens`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
-		limit, _ := cmd.Flags().GetInt("limit")
-		delayMs, _ := cmd.Flags().GetInt("delay-ms")
-		after, _ := cmd.Flags().GetString("after")
-		return eventing.SyncBanners(eventing.SyncBannersOptions{
-			Kind:    eventing.ArtworkPoster,
-			DryRun:  dryRun,
-			Limit:   limit,
-			DelayMs: delayMs,
-			After:   after,
-		})
+		opts, err := artworkOptions(cmd, eventing.ArtworkPoster)
+		if err != nil {
+			return err
+		}
+		return eventing.SyncBanners(opts)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(syncPosters)
-	syncPosters.Flags().Bool("dry-run", false, "resolve artwork but publish nothing")
-	syncPosters.Flags().Int("limit", 0, "stop after N anime (0 = all)")
-	syncPosters.Flags().Int("delay-ms", 250, "pause between anime, in milliseconds")
-	syncPosters.Flags().String("after", "", "resume from this anime id (exclusive)")
+	artworkFlags(syncPosters)
 }
