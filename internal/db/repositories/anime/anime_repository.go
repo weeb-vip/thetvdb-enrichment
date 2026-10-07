@@ -15,6 +15,12 @@ type AnimeRepositoryImpl interface {
 	// FindWithTheTVDBID pages through anime that carry a thetvdbid, ordered by
 	// id so a paged walk is stable while the table is being written to.
 	FindWithTheTVDBID(ctx context.Context, afterID string, limit int) ([]*Anime, error)
+	// FindWithTheTVDBIDBySeason: the anime of one season (anime_seasons) that
+	// carry a thetvdbid, ordered by id.
+	FindWithTheTVDBIDBySeason(ctx context.Context, season string) ([]*Anime, error)
+	// FindByIDs: the given anime, whether or not they carry a thetvdbid; the
+	// caller reports the ones that do not.
+	FindByIDs(ctx context.Context, ids []string) ([]*Anime, error)
 }
 
 type AnimeRepository struct {
@@ -61,6 +67,35 @@ func (a *AnimeRepository) FindWithTheTVDBID(ctx context.Context, afterID string,
 		q = q.Where("id > ?", afterID)
 	}
 	err := q.Order("id ASC").Limit(limit).Find(&records).Error
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (a *AnimeRepository) FindWithTheTVDBIDBySeason(ctx context.Context, season string) ([]*Anime, error) {
+	var records []*Anime
+	err := a.db.DB.WithContext(ctx).
+		Model(&Anime{}).
+		Joins("INNER JOIN anime_seasons AS s ON s.anime_id = anime.id").
+		Where("s.season = ? AND anime.thetvdbid IS NOT NULL AND anime.thetvdbid <> ''", season).
+		Order("anime.id ASC").
+		Find(&records).Error
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (a *AnimeRepository) FindByIDs(ctx context.Context, ids []string) ([]*Anime, error) {
+	var records []*Anime
+	if len(ids) == 0 {
+		return records, nil
+	}
+	err := a.db.DB.WithContext(ctx).
+		Where("id IN ?", ids).
+		Order("id ASC").
+		Find(&records).Error
 	if err != nil {
 		return nil, err
 	}
